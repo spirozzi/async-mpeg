@@ -5,6 +5,7 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Queue;
 
 import javazoom.jl.decoder.JavaLayerException;
@@ -15,20 +16,14 @@ import javazoom.jl.player.Player;
  * JLayer 1.0.1 library. The file "jl1.0.1.jar" must be included in the build
  * path to utilize this class.
  * 
- * Everything is GNU GPL v3.
+ * Everything is GNU LGPL v3.
  * 
  * @author Stephen Pirozzi
  * @version 1.0
  */
 public final class MP3Player
 {
-	// *************************************************************************
 	// Private variables
-	// *************************************************************************
-	/**
-	 * Used when throwing runtime exceptions to client code.
-	 */
-	private static final String myClass = "MP3Player.java: ";
 	
 	/**
 	 * A queue of all MPEG files. All files that are removed
@@ -50,7 +45,7 @@ public final class MP3Player
 	
 	/**
 	 * State variable that denotes whether an MPEG file is currently being
-	 * played
+	 * played.
 	 */
 	private volatile boolean isPlaying = false;
 	
@@ -61,9 +56,8 @@ public final class MP3Player
 	 */
 	private volatile boolean isLooping = false;
 	
-	// *************************************************************************
 	// Constructors
-	// *************************************************************************
+	
 	/**
 	 * Constructs a new <code>MP3Player</code> instance and queues the given
 	 * file for playback.
@@ -88,46 +82,54 @@ public final class MP3Player
 		playbackQueue = new LinkedList<File>();
 		for (int i = 0; i < arr.length; i++)
 		{
-			if (arr[i] == null || arr[i].getPath().equals(""))
+			if (arr[i] == null || arr[i].getPath() == null)
 			{
-				throw new NullPointerException("Null file or filename.");
+				throw new NullPointerException(
+						"MP3Player.java: Null file or filename.");
 			}
 			playbackQueue.add(arr[i]);
 		}
 	}
 	
-	// *************************************************************************
-	// Public methods
-	// *************************************************************************
 	/**
-	 * Immediately stops playing the current audio file (if one is playing) and
-	 * begins to play the next file in the queue. Returns immediately if
-	 * playback is still in progress.
+	 * Constructs a new <code>MP3Player</code> instance and queues the
+	 * files in the list for playback.
+	 * 
+	 * @param list
+	 *            A list of MPEG files to be queued for playback
 	 */
-	@SuppressWarnings("resource")
-	public void playNext()
+	public MP3Player(List<File> list)
+	{
+		playbackQueue = new LinkedList<File>();
+		for (int i = 0; i < list.size(); i++)
+		{
+			if (list.get(i) == null || list.get(i).getPath() == null)
+			{
+				throw new NullPointerException(
+						"MP3Player.java: Null file or filename.");
+			}
+			playbackQueue.add(list.get(i));
+		}
+	}
+	
+	// Public methods
+	
+	/**
+	 * Plays the next file in the playback queue. Returns immediately if
+	 * playback is still in progress.
+	 * 
+	 * @throws FileNotFoundException
+	 *             if the file to be played is invalid
+	 * @throws JavaLayerException
+	 *             if the audio cannot be played
+	 */
+	public void playNext() throws FileNotFoundException, JavaLayerException
 	{
 		if (isPlaying)
 		{
 			return;
 		}
-		// Remove the file from the queue
-		File f = playbackQueue.remove();
-		// Stream closed later by playerThread
-		FileInputStream stream = null;
-		try
-		{
-			stream = new FileInputStream(f);
-		}
-		catch (FileNotFoundException e)
-		{
-			wrapAndRethrow(e);
-		}
-		// Add the file back to the queue
-		playbackQueue.add(f);
-		// Instantiate the async player thread
-		playerThread = new PlayerRunnerThread(stream);
-		// Start playback
+		playerThread = new PlayerRunnerThread(Playback.PLAY_NEXT);
 		playerThread.start();
 	}
 	
@@ -135,40 +137,37 @@ public final class MP3Player
 	 * Plays the queued MPEG file(s) one time each. Returns immediately if
 	 * playback is still in progress.
 	 * 
-	 * @throws RuntimeException
-	 *             if any MPEG file in the playback queue is invalid
+	 * @throws FileNotFoundException
+	 *             if any file considered for playback is invalid
+	 * @throws JavaLayerException
+	 *             if the audio cannot be played
 	 */
-	public void playAllOnce()
+	public void playAllOnce() throws FileNotFoundException, JavaLayerException
 	{
 		if (isPlaying)
 		{
 			return;
 		}
-		for (int i = 0; i < playbackQueue.size(); i++)
-		{
-			playNext();
-			while (!player.isComplete())
-			{
-				// Delay loop iteration
-				// TODO: make this not block (move to PRT)
-			}
-		}
+		playerThread = new PlayerRunnerThread(Playback.PLAY_ALL_ONCE);
+		playerThread.start();
 	}
 	
 	/**
 	 * Continues to play the MPEG file(s) until the <code>stop</code> method is
-	 * called.
+	 * called. Returns immediately if playback is still in progress.
 	 * 
 	 * @throws FileNotFoundException
 	 *             if any MPEG file in the playback queue is invalid
 	 */
 	public void loopAll() throws FileNotFoundException
 	{
-		isLooping = true;
-		while (isLooping)
+		if (isPlaying())
 		{
-			playAllOnce();
+			return;
 		}
+		isLooping = true;
+		playerThread = new PlayerRunnerThread(Playback.LOOP_ALL);
+		playerThread.start();
 	}
 	
 	/**
@@ -177,8 +176,8 @@ public final class MP3Player
 	 */
 	public void stop()
 	{
-		isPlaying = false;
 		isLooping = false;
+		isPlaying = false;
 		player.close();
 	}
 	
@@ -203,8 +202,8 @@ public final class MP3Player
 	@Deprecated
 	public void pause()
 	{
-		throw new UnsupportedOperationException(myClass
-				+ "Pause method not implemented");
+		throw new UnsupportedOperationException(
+				"MP3Player.java: Pause method not implemented");
 	}
 	
 	/**
@@ -218,88 +217,136 @@ public final class MP3Player
 	@Deprecated
 	public void resume()
 	{
-		throw new UnsupportedOperationException(myClass
-				+ "Resume method not implemented");
+		throw new UnsupportedOperationException(
+				"MP3Player.java: Resume method not implemented");
 	}
 	
-	// *************************************************************************
-	// Private helper method
-	// *************************************************************************
-	/**
-	 * Wraps more specific exceptions into a custom, descriptive
-	 * <code>RuntimeException</code> and throws it. This way, client code is not
-	 * forced to catch thrown exceptions. Client code can explicitly choose to
-	 * catch RuntimeExceptions instead if error-handling behavior is desired.
-	 * 
-	 * @param e
-	 *            An exception of any kind
-	 */
-	private static void wrapAndRethrow(Exception e) throws RuntimeException
-	{
-		String msg = myClass + e.getClass().toString() + ":" + e.getMessage();
-		RuntimeException r = new RuntimeException(msg);
-		r.setStackTrace(e.getStackTrace());
-		throw r;
-	}
-	
-	// *************************************************************************
 	// Private inner class
-	// *************************************************************************
+	
 	/**
-	 * Thread class responsible for the playback of MPEG audio files in the
-	 * playback queue.
+	 * <code>Thread</code> class responsible for the playback of MPEG audio
+	 * files in the playback queue.
 	 * 
 	 * @see java.lang.Thread
 	 */
 	private class PlayerRunnerThread extends Thread
 	{
 		/**
-		 * An MPEG file's stream. Used to instantiate the <code>Player</code>.
+		 * Denotes whether the <code>run</code> method should play only the next
+		 * file, all files, or loop all files in the playback queue.
 		 */
-		private final FileInputStream stream;
+		private final Playback playback;
 		
 		/**
 		 * Constructs a new <code>PlayerRunnerThread</code> instance that
 		 * 
-		 * @throw RuntimeException if the file stream cannot be played
+		 * @throw JavaLayerException if the file stream cannot be played
 		 */
-		PlayerRunnerThread(FileInputStream fis)
+		PlayerRunnerThread(Playback pb)
 		{
-			stream = fis;
-			try
-			{
-				player = new Player(stream);
-			}
-			catch (JavaLayerException e)
-			{
-				wrapAndRethrow(e);
-			}
+			playback = pb;
 		}
 		
 		/**
-		 * Plays the given audio file and closes the stream when playback is
-		 * complete.
+		 * Starts playback of file(s) in the playback queue. Behavior is based
+		 * on the <code>Playback</code> constant passed to the constructor.
 		 * 
 		 * @throws RuntimeException
-		 *             if the MPEG file cannot be played
+		 *             if any MPEG file cannot be played
 		 */
 		@Override
 		public void run()
 		{
 			try
 			{
-				player.play();
-				// Blocks this thread until playback is complete
-				stream.close();
+				switch (playback)
+				{
+					case PLAY_NEXT:
+						playNextAsync();
+						break;
+					case PLAY_ALL_ONCE:
+						playAllOnceAsync();
+						break;
+					case LOOP_ALL:
+						loopAllAsync();
+						break;
+				}
+				// Blocks this thread until all playback is complete
 			}
-			catch (JavaLayerException e)
+			catch (IOException | JavaLayerException e)
 			{
-				wrapAndRethrow(e);
-			}
-			catch (IOException e)
-			{
-				wrapAndRethrow(e);
+				throw new RuntimeException(
+						"MP3Player.java: Cannot play MPEG file");
 			}
 		}
+		
+		/**
+		 * Plays the next file in the playback queue.
+		 */
+		private void playNextAsync() throws JavaLayerException,
+			FileNotFoundException
+		{
+			player = new Player(getNextFileInputStream());
+			player.play();
+		}
+		
+		/**
+		 * Plays the queued MPEG file(s) one time each.
+		 */
+		private void playAllOnceAsync() throws FileNotFoundException,
+			JavaLayerException
+		{
+			for (int i = 0; i < playbackQueue.size(); i++)
+			{
+				playNextAsync();
+			}
+		}
+		
+		/**
+		 * Continues to play the MPEG file(s) until the <code>stop</code> method
+		 * is called.
+		 */
+		private void loopAllAsync() throws FileNotFoundException,
+			JavaLayerException
+		{
+			while (isLooping())
+			{
+				playAllOnceAsync();
+			}
+		}
+		
+		/**
+		 * Gets the next file stream from the playback queue.
+		 */
+		private FileInputStream getNextFileInputStream()
+			throws FileNotFoundException
+		{
+			File f = playbackQueue.remove();
+			playbackQueue.add(f);
+			return new FileInputStream(f);
+		}
+	}
+	
+	/**
+	 * Used to control playback within the <code>PlayerRunnerThread</code>
+	 * class.
+	 */
+	private static enum Playback
+	{
+		/**
+		 * Only play the next song in the playback queue.
+		 */
+		PLAY_NEXT,
+		
+		/**
+		 * Play all files in the playback queue once.
+		 */
+		PLAY_ALL_ONCE,
+		
+		/**
+		 * Keep playing all files in the playback queue until
+		 * <code>MP3Player.stop</code> is called.
+		 */
+		LOOP_ALL;
 	}
 }
